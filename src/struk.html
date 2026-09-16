@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cetak Struk Thermal</title>
+    
+    <style>
+        /* ... existing style code from previous response ... */
+        body {
+            font-family: 'Courier New', Courier, monospace;
+            background-color: #f0f0f0;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .receipt-container {
+            background-color: #fff;
+            width: 58mm;
+            padding: 4mm;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            box-sizing: border-box;
+            font-size: 12px;
+            line-height: 1.2;
+            color: #000;
+        }
+
+        .text-center { text-align: center; }
+        .text-right { text-align: right; }
+        .text-left { text-align: left; }
+        .font-bold { font-weight: bold; }
+        
+        .divider {
+            border-top: 1px dashed #000;
+            margin: 5px 0;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+
+        td { vertical-align: top; }
+
+        .btn-print {
+            margin-bottom: 20px;
+            padding: 10px 20px;
+            background-color: #0056b3;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+
+        .btn-print:hover { background-color: #004494; }
+
+        /* KUNCI PERBAIKAN: Bagian @media print */
+        @media print {
+            .btn-print {
+                display: none !important;
+            }
+
+            /* Memaksa ukuran kertas dinamis berdasarkan tinggi konten */
+            @page {
+                margin: 0; 
+                size: 58mm auto; 
+            }
+
+            html, body {
+                margin: 0 !important;
+                padding: 0 !important;
+                width: 58mm;
+                height: max-content !important; /* Mencegah memanjang ke bawah */
+                background-color: transparent;
+            }
+
+            .receipt-container {
+                width: 58mm; 
+                margin: 0 !important;
+                padding: 0 2mm !important;
+                box-shadow: none;
+                page-break-after: avoid; /* Mencegah halaman ekstra kosong */
+                page-break-inside: avoid;
+            }
+
+            .receipt-container > div:last-child {
+                margin-bottom: 0 !important;
+                padding-bottom: 0 !important;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <button class="btn-print" onclick="window.print()">🖨️ Cetak Struk</button>
+
+    <div class="receipt-container" id="printableArea">
+        <!-- ... existing content code from previous response ... -->
+        <div class="text-center">
+            <div class="font-bold" style="font-size: 14px;">TOKO MAKMUR</div>
+            <div>Jl. Raya Ambulu No. 12</div>
+            <div>Telp: 08123456789</div>
+        </div>
+        
+        <div class="divider"></div>
+        
+        <table style="margin-bottom: 5px;">
+            <tr><td class="text-left">NO RESI</td><td class="text-right">TEST-001</td></tr>
+            <tr><td class="text-left">TGL/JAM</td><td class="text-right">16/09/2026 09:30</td></tr>
+            <tr><td class="text-left">KASIR</td><td class="text-right">ADMIN</td></tr>
+        </table>
+        
+        <div class="divider"></div>
+        <div class="font-bold text-center">ITEM</div>
+        <div class="divider"></div>
+
+        <table>
+            <tr><td colspan="2">KOPI SUSU GULA AREN</td></tr>
+            <tr><td>2 x 15.000</td><td class="text-right">30.000</td></tr>
+            <tr><td colspan="2">ROTI BAKAR COKLAT</td></tr>
+            <tr><td>1 x 12.000</td><td class="text-right">12.000</td></tr>
+        </table>
+
+        <div class="divider"></div>
+
+        <table>
+            <tr><td>Subtotal</td><td class="text-right">42.000</td></tr>
+            <tr><td>Diskon</td><td class="text-right">-2.000</td></tr>
+            <tr class="font-bold"><td>TOTAL</td><td class="text-right">40.000</td></tr>
+            <tr><td>Bayar</td><td class="text-right">50.000</td></tr>
+            <tr><td>Kembali</td><td class="text-right">10.000</td></tr>
+        </table>
+
+        <div class="divider"></div>
+
+        <div class="text-center" style="margin-top: 10px; margin-bottom: 0;">
+            <div>TERIMA KASIH</div>
+            <div>SELAMAT DATANG KEMBALI</div>
+        </div>
+    </div>
+
+</body>
+</html>
