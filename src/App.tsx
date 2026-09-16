@@ -1,0 +1,1036 @@
+import React, { useState, useEffect, createContext, useContext } from 'react';
+import { 
+  Store, LayoutTemplate, ShoppingCart, History, Settings, Printer, 
+  Plus, Trash2, Edit, Save, RefreshCw, Download, Upload,
+  ChevronDown, User, AlertTriangle, CheckCircle, Info, X
+} from 'lucide-react';
+
+export type StoreData = {
+  id: string;
+  name: string;
+  address1: string;
+  address2?: string;
+  phone: string;
+  templateId: string;
+  logoUrl?: string;
+  footerText?: string;
+  fontFamily?: string;
+};
+
+export type TemplateData = {
+  id: string;
+  name: string;
+  type: 'complete' | 'minimal' | 'compact';
+  showLogo: boolean;
+  showCashier: boolean;
+  alignCenter: boolean;
+  footerMessage: string;
+};
+
+export type CartItem = {
+  id: string;
+  name: string;
+  qty: number;
+  unit: string;
+  price: number;
+  subtotal: number;
+};
+
+export type Transaction = {
+  id: string;
+  receiptNo: string;
+  storeId: string;
+  templateId: string;
+  cashierName: string;
+  date: string; // YYYY-MM-DD
+  time: string; // HH:mm:ss
+  items: CartItem[];
+  subtotal: number;
+  discount: number;
+  tax: number;
+  total: number;
+  payment: number;
+  change: number;
+  status: 'printed' | 'saved';
+};
+
+export type AppSettings = {
+  receiptPrefix: string;
+  receiptDigits: number;
+  receiptMode: 'random' | 'sequential';
+  printerWidth: '57mm' | '58mm' | '80mm';
+};
+
+export type ToastMessage = {
+  id: string;
+  type: 'success' | 'error' | 'info';
+  message: string;
+};
+
+const DEMO_TEMPLATES: TemplateData[] = [
+  { id: 'tpl-1', name: 'Template Lengkap', type: 'complete', showLogo: false, showCashier: true, alignCenter: true, footerMessage: 'TERIMA KASIH\nSELAMAT DATANG KEMBALI' },
+  { id: 'tpl-2', name: 'Template Minimalis', type: 'minimal', showLogo: false, showCashier: true, alignCenter: false, footerMessage: 'TERIMA KASIH' }
+];
+
+const DEMO_STORES: StoreData[] = [
+  { id: 'store-1', name: 'TOKO MAKMUR', address1: 'Jl. Raya Ambulu No. 12', phone: '08123456789', templateId: 'tpl-1', fontFamily: "'Courier New', Courier, monospace" },
+  { id: 'store-2', name: 'TOKO JAYA', address1: 'Jl. Watu Ulo No. 88', phone: '08234567890', templateId: 'tpl-2', fontFamily: "'Space Mono', monospace" }
+];
+
+const DEFAULT_SETTINGS: AppSettings = {
+  receiptPrefix: 'TRX-',
+  receiptDigits: 6,
+  receiptMode: 'random',
+  printerWidth: '57mm'
+};
+
+interface AppContextType {
+  stores: StoreData[];
+  templates: TemplateData[];
+  transactions: Transaction[];
+  settings: AppSettings;
+  activeStoreId: string;
+  printQueue: Transaction | null;
+  toasts: ToastMessage[];
+  confirmModal: { isOpen: boolean; title: string; message: string; onConfirm: () => void } | null;
+  setStores: React.Dispatch<React.SetStateAction<StoreData[]>>;
+  setTemplates: React.Dispatch<React.SetStateAction<TemplateData[]>>;
+  setTransactions: React.Dispatch<React.SetStateAction<Transaction[]>>;
+  setSettings: React.Dispatch<React.SetStateAction<AppSettings>>;
+  setActiveStoreId: (id: string) => void;
+  triggerPrint: (tx: Transaction) => void;
+  clearPrintQueue: () => void;
+  exportData: () => void;
+  importData: (data: string) => boolean;
+  showToast: (message: string, type?: 'success' | 'error' | 'info') => void;
+  askConfirmation: (title: string, message: string, onConfirm: () => void) => void;
+  closeConfirmModal: () => void;
+}
+
+const AppContext = createContext<AppContextType | undefined>(undefined);
+
+const useAppContext = () => {
+  const context = useContext(AppContext);
+  if (!context) throw new Error("useAppContext must be used within AppProvider");
+  return context;
+};
+
+const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [stores, setStores] = useState<StoreData[]>(() => JSON.parse(localStorage.getItem('pos_stores') || 'null') || DEMO_STORES);
+  const [templates, setTemplates] = useState<TemplateData[]>(() => JSON.parse(localStorage.getItem('pos_templates') || 'null') || DEMO_TEMPLATES);
+  const [transactions, setTransactions] = useState<Transaction[]>(() => JSON.parse(localStorage.getItem('pos_transactions') || 'null') || []);
+  const [settings, setSettings] = useState<AppSettings>(() => JSON.parse(localStorage.getItem('pos_settings') || 'null') || DEFAULT_SETTINGS);
+  
+  const [activeStoreId, setActiveStoreId] = useState<string>(() => localStorage.getItem('pos_active_store') || DEMO_STORES[0].id);
+  const [printQueue, setPrintQueue] = useState<Transaction | null>(null);
+
+  // Custom Notifications & Confirmations (Replaces native alert/confirm)
+  const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  const [confirmModal, setConfirmModal] = useState<{ isOpen: boolean; title: string; message: string; onConfirm: () => void } | null>(null);
+
+  useEffect(() => { localStorage.setItem('pos_stores', JSON.stringify(stores)); }, [stores]);
+  useEffect(() => { localStorage.setItem('pos_templates', JSON.stringify(templates)); }, [templates]);
+  useEffect(() => { localStorage.setItem('pos_transactions', JSON.stringify(transactions)); }, [transactions]);
+  useEffect(() => { localStorage.setItem('pos_settings', JSON.stringify(settings)); }, [settings]);
+  useEffect(() => { localStorage.setItem('pos_active_store', activeStoreId); }, [activeStoreId]);
+
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
+    const id = Math.random().toString(36).substring(2, 9);
+    setToasts(prev => [...prev, { id, message, type }]);
+    setTimeout(() => {
+      setToasts(prev => prev.filter(t => t.id !== id));
+    }, 3500);
+  };
+
+  const askConfirmation = (title: string, message: string, onConfirm: () => void) => {
+    setConfirmModal({ isOpen: true, title, message, onConfirm });
+  };
+
+  const closeConfirmModal = () => {
+    setConfirmModal(null);
+  };
+
+  const triggerPrint = (tx: Transaction) => {
+    setPrintQueue(tx);
+    setTimeout(() => {
+      window.print();
+      setPrintQueue(null);
+    }, 400);
+  };
+
+  const clearPrintQueue = () => setPrintQueue(null);
+
+  const exportData = () => {
+    const data = { stores, templates, transactions, settings };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `backup-struk-${new Date().toISOString().split('T')[0]}.json`;
+    a.click();
+    showToast("Backup data berhasil diunduh!", "success");
+  };
+
+  const importData = (jsonData: string) => {
+    try {
+      const data = JSON.parse(jsonData);
+      if (data.stores) setStores(data.stores);
+      if (data.templates) setTemplates(data.templates);
+      if (data.transactions) setTransactions(data.transactions);
+      if (data.settings) setSettings(data.settings);
+      showToast("Data berhasil dipulihkan!", "success");
+      return true;
+    } catch (e) {
+      showToast("Format file backup tidak valid!", "error");
+      return false;
+    }
+  };
+
+  return (
+    <AppContext.Provider value={{
+      stores, templates, transactions, settings, activeStoreId, printQueue,
+      toasts, confirmModal,
+      setStores, setTemplates, setTransactions, setSettings, setActiveStoreId,
+      triggerPrint, clearPrintQueue, exportData, importData, showToast,
+      askConfirmation, closeConfirmModal
+    }}>
+      {children}
+    </AppContext.Provider>
+  );
+};
+
+const formatCurrency = (amount: number) => {
+  return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(amount);
+};
+
+const generateId = () => Math.random().toString(36).substring(2, 9);
+
+const getCurrentDateTime = () => {
+  const now = new Date();
+  const pad = (n: number) => n.toString().padStart(2, '0');
+  const date = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  const time = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+  return { date, time };
+};
+
+const formatDateToLocale = (dateStr: string) => {
+  if (!dateStr) return '';
+  const [y, m, d] = dateStr.split('-');
+  return `${d}/${m}/${y}`;
+};
+
+const generateUniqueReceiptNo = (settings: AppSettings, transactions: Transaction[]) => {
+  const existingNos = new Set(transactions.map(t => t.receiptNo));
+  let attempts = 0;
+  const maxAttempts = 1000;
+
+  while (attempts < maxAttempts) {
+    let newNo = settings.receiptPrefix;
+    if (settings.receiptMode === 'random') {
+      let num = '';
+      for (let i = 0; i < settings.receiptDigits; i++) {
+        num += Math.floor(Math.random() * 10).toString();
+      }
+      newNo += num;
+    } else {
+      const lastSeq = transactions
+        .filter(t => t.receiptNo.startsWith(settings.receiptPrefix))
+        .map(t => {
+          const numStr = t.receiptNo.replace(settings.receiptPrefix, '');
+          return parseInt(numStr, 10);
+        })
+        .filter(n => !isNaN(n))
+        .sort((a, b) => b - a)[0] || 0;
+      
+      const nextSeq = lastSeq + 1;
+      newNo += nextSeq.toString().padStart(settings.receiptDigits, '0');
+    }
+
+    if (!existingNos.has(newNo)) {
+      return newNo;
+    }
+    attempts++;
+  }
+  return `${settings.receiptPrefix}${Date.now().toString().slice(-settings.receiptDigits)}`;
+};
+
+const Input = ({ label, ...props }: any) => (
+  <div className="mb-4">
+    {label && <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>}
+    <input className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" {...props} />
+  </div>
+);
+
+const Button = ({ children, variant = 'primary', className = '', ...props }: any) => {
+  const base = "px-4 py-2 rounded-md font-medium transition-all focus:outline-none flex items-center justify-center gap-2 active:scale-95 text-sm";
+  const variants: any = {
+    primary: "bg-blue-600 text-white hover:bg-blue-700 shadow-sm",
+    secondary: "bg-gray-100 text-gray-800 hover:bg-gray-200 border border-gray-300",
+    danger: "bg-red-600 text-white hover:bg-red-700 shadow-sm",
+    outline: "border border-gray-300 text-gray-700 hover:bg-gray-50"
+  };
+  return <button className={`${base} ${variants[variant] || variants.primary} ${className}`} {...props}>{children}</button>;
+};
+
+const ReceiptRenderer = ({ transaction, isPrintMode = false }: { transaction: Transaction, isPrintMode?: boolean }) => {
+  const { stores, templates } = useAppContext();
+  const store = stores.find(s => s.id === transaction.storeId) || stores[0];
+  const template = templates.find(t => t.id === transaction.templateId) || templates[0];
+
+  // 57mm Thermal width fitting: ~210px width with 10px-11px monospace font
+  const wrapperClass = isPrintMode 
+    ? "w-[57mm] mx-auto bg-white text-black text-[10.5px] leading-tight p-1" 
+    : "w-[210px] mx-auto bg-white shadow-md p-3 text-black text-[10.5px] leading-tight border border-gray-200 select-none";
+
+  const storeFont = store.fontFamily || "'Courier New', Courier, monospace";
+
+  // Clean CSS Dashed line instead of fixed character length strings
+  const Divider = ({ double = false }: { double?: boolean }) => (
+    <div className={`my-1.5 w-full ${double ? 'border-b-2 border-dashed border-black' : 'border-b border-dashed border-gray-800'}`} />
+  );
+
+  return (
+    <div className={wrapperClass} style={{ boxSizing: 'border-box', overflow: 'hidden', fontFamily: storeFont }}>
+      {/* HEADER */}
+      <div className={template.alignCenter ? "text-center" : "text-left"}>
+        {template.showLogo && store.logoUrl && (
+           <img src={store.logoUrl} alt="Logo" className={`max-w-[80px] max-h-[50px] object-contain mb-1 ${template.alignCenter ? 'mx-auto' : ''}`} />
+        )}
+        <div className="font-bold text-[12px] uppercase leading-snug">{store.name}</div>
+        <div className="whitespace-pre-wrap text-[10px] text-gray-800">{store.address1}</div>
+        {store.address2 && <div className="whitespace-pre-wrap text-[10px] text-gray-800">{store.address2}</div>}
+        <div className="text-[10px] text-gray-800">Telp: {store.phone}</div>
+      </div>
+      
+      <Divider double={template.type === 'complete'} />
+
+      {/* INFO META */}
+      <div className="text-[10px] space-y-0.5">
+        <div className="flex justify-between">
+          <span>NO RESI</span>
+          <span className="font-bold">{transaction.receiptNo}</span>
+        </div>
+        <div className="flex justify-between">
+          <span>TGL/JAM</span>
+          <span>{formatDateToLocale(transaction.date)} {transaction.time}</span>
+        </div>
+        {template.showCashier && transaction.cashierName && (
+           <div className="flex justify-between">
+             <span>KASIR</span>
+             <span className="uppercase">{transaction.cashierName}</span>
+           </div>
+        )}
+      </div>
+
+      <Divider />
+
+      {/* ITEMS */}
+      {template.type === 'complete' && (
+        <>
+          <div className="flex justify-between font-bold text-[10px] mb-0.5">
+            <span>ITEM</span>
+            <span>TOTAL</span>
+          </div>
+          <Divider />
+        </>
+      )}
+
+      <div className="space-y-1">
+        {transaction.items.map((item, idx) => (
+          <div key={idx} className="text-[10px]">
+            <div className="font-bold break-words uppercase">{item.name}</div>
+            <div className="flex justify-between text-gray-800 pl-1">
+              <span>{item.qty} x {item.price.toLocaleString('id-ID')}</span>
+              <span className="font-semibold text-black">{item.subtotal.toLocaleString('id-ID')}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <Divider />
+
+      {/* TOTALS */}
+      <div className="space-y-0.5 text-[10.5px]">
+        {(template.type === 'complete' || transaction.discount > 0) && (
+          <div className="flex justify-between">
+            <span>Subtotal</span>
+            <span>{transaction.subtotal.toLocaleString('id-ID')}</span>
+          </div>
+        )}
+        {transaction.discount > 0 && (
+          <div className="flex justify-between">
+            <span>Diskon</span>
+            <span>-{transaction.discount.toLocaleString('id-ID')}</span>
+          </div>
+        )}
+        <div className="flex justify-between font-bold text-[11px] pt-0.5 border-t border-gray-300">
+          <span>TOTAL</span>
+          <span>{transaction.total.toLocaleString('id-ID')}</span>
+        </div>
+        <div className="flex justify-between pt-0.5">
+          <span>Bayar</span>
+          <span>{transaction.payment.toLocaleString('id-ID')}</span>
+        </div>
+        <div className="flex justify-between font-semibold">
+          <span>Kembali</span>
+          <span>{transaction.change.toLocaleString('id-ID')}</span>
+        </div>
+      </div>
+
+      <Divider double={template.type === 'complete'} />
+
+      {/* FOOTER */}
+      <div className="text-center whitespace-pre-wrap text-[9.5px] mt-2 mb-1 uppercase font-medium">
+        {template.footerMessage || store.footerText || "TERIMA KASIH"}
+      </div>
+    </div>
+  );
+};
+
+const PosView = () => {
+  const { stores, settings, activeStoreId, transactions, setTransactions, triggerPrint, showToast } = useAppContext();
+  const store = stores.find(s => s.id === activeStoreId) || stores[0];
+  
+  const [cashierName, setCashierName] = useState('Kasir 1');
+  const [receiptNo, setReceiptNo] = useState(() => generateUniqueReceiptNo(settings, transactions));
+  
+  const [manualMode, setManualMode] = useState(false);
+  const [dateStr, setDateStr] = useState(() => getCurrentDateTime().date);
+  const [timeStr, setTimeStr] = useState(() => getCurrentDateTime().time);
+
+  useEffect(() => {
+    if (manualMode) return;
+    const timer = setInterval(() => {
+      const dt = getCurrentDateTime();
+      setDateStr(dt.date);
+      setTimeStr(dt.time);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [manualMode]);
+
+  const [items, setItems] = useState<CartItem[]>([]);
+  const [itemName, setItemName] = useState('');
+  const [itemQty, setItemQty] = useState(1);
+  const [itemPrice, setItemPrice] = useState<number | ''>('');
+
+  const [payment, setPayment] = useState<number | ''>('');
+  const [discount, setDiscount] = useState<number | ''>('');
+
+  const subtotal = items.reduce((acc, item) => acc + item.subtotal, 0);
+  const numDiscount = Number(discount) || 0;
+  const numPayment = Number(payment) || 0;
+  const total = Math.max(0, subtotal - numDiscount);
+  const change = numPayment >= total ? numPayment - total : 0;
+
+  const handleAddItem = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!itemName.trim()) {
+      showToast("Nama barang harus diisi!", "error");
+      return;
+    }
+    if (!itemPrice || Number(itemPrice) <= 0) {
+      showToast("Harga barang harus lebih dari 0!", "error");
+      return;
+    }
+    const newItem: CartItem = {
+      id: generateId(),
+      name: itemName.trim(),
+      qty: itemQty,
+      unit: 'pcs',
+      price: Number(itemPrice),
+      subtotal: itemQty * Number(itemPrice)
+    };
+    setItems([...items, newItem]);
+    setItemName('');
+    setItemQty(1);
+    setItemPrice('');
+    showToast(`Barang "${newItem.name}" ditambahkan`, "success");
+  };
+
+  const handleRemoveItem = (id: string) => {
+    setItems(items.filter(i => i.id !== id));
+  };
+
+  const handleGenerateReceipt = () => {
+    const newNo = generateUniqueReceiptNo(settings, transactions);
+    setReceiptNo(newNo);
+    showToast(`Nomor Resi Baru: ${newNo}`, "info");
+  };
+
+  const currentTransaction: Transaction = {
+    id: generateId(),
+    receiptNo,
+    storeId: store.id,
+    templateId: store.templateId,
+    cashierName,
+    date: dateStr,
+    time: timeStr,
+    items,
+    subtotal,
+    discount: numDiscount,
+    tax: 0,
+    total,
+    payment: numPayment,
+    change,
+    status: 'saved'
+  };
+
+  const handleSaveAndPrint = () => {
+    if (items.length === 0) {
+      showToast("Keranjang belanja masih kosong!", "error");
+      return;
+    }
+    if (numPayment < total) {
+      showToast("Nominal pembayaran masih kurang!", "error");
+      return;
+    }
+
+    const finalTx = { ...currentTransaction, status: 'printed' as const };
+    
+    setTransactions(prev => [finalTx, ...prev]);
+    triggerPrint(finalTx);
+
+    setItems([]);
+    setPayment('');
+    setDiscount('');
+    setReceiptNo(generateUniqueReceiptNo(settings, [...transactions, finalTx]));
+    showToast("Transaksi berhasil disimpan & dicetak!", "success");
+  };
+
+  const handleTestPrint = () => {
+    const testTx: Transaction = {
+      id: 'test',
+      receiptNo: 'TEST-001',
+      storeId: store.id,
+      templateId: store.templateId,
+      cashierName: 'ADMIN',
+      date: getCurrentDateTime().date,
+      time: getCurrentDateTime().time,
+      items: [
+        { id: '1', name: 'KOPI SUSU GULA AREN', qty: 2, unit: 'pcs', price: 15000, subtotal: 30000 },
+        { id: '2', name: 'ROTI BAKAR COKLAT', qty: 1, unit: 'pcs', price: 12000, subtotal: 12000 }
+      ],
+      subtotal: 42000, discount: 2000, tax: 0, total: 40000, payment: 50000, change: 10000, status: 'printed'
+    };
+    triggerPrint(testTx);
+  };
+
+  return (
+    <div className="flex flex-col xl:flex-row h-full gap-6">
+      {/* LEFT FORM */}
+      <div className="flex-1 flex flex-col gap-4 overflow-y-auto pr-1 pb-12">
+        
+        {/* Active Store Header */}
+        <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 flex justify-between items-center">
+          <div>
+            <span className="text-xs font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-100">TOKO AKTIF</span>
+            <h2 className="text-xl font-bold text-gray-800 mt-1">{store.name}</h2>
+            <p className="text-xs text-gray-500">{store.address1}</p>
+          </div>
+          <Button variant="outline" onClick={handleTestPrint}>
+            <Printer size={16}/> Test Print 57mm
+          </Button>
+        </div>
+
+        {/* Transaction Meta Settings */}
+        <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Nama Kasir</label>
+            <div className="flex relative">
+               <User className="absolute left-3 top-2.5 text-gray-400" size={16}/>
+               <input type="text" value={cashierName} onChange={e => setCashierName(e.target.value)} className="w-full pl-9 pr-3 py-1.5 border rounded-md text-sm" />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">No. Resi / Nota</label>
+            <div className="flex gap-2">
+              <input type="text" value={receiptNo} onChange={e => setReceiptNo(e.target.value)} className="w-full px-3 py-1.5 border rounded-md text-sm font-mono" />
+              <Button onClick={handleGenerateReceipt} variant="secondary" title="Acak Nomor Resi"><RefreshCw size={14}/></Button>
+            </div>
+          </div>
+          
+          <div className="col-span-1 md:col-span-2 bg-gray-50 p-3 rounded-md border border-gray-200">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-semibold text-gray-700">Waktu & Tanggal Transaksi</span>
+              <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
+                <input type="checkbox" checked={manualMode} onChange={e => setManualMode(e.target.checked)} className="rounded text-blue-600" />
+                Ubah Manual
+              </label>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+               <input type="date" value={dateStr} onChange={e => setDateStr(e.target.value)} disabled={!manualMode} className="w-full px-3 py-1.5 border rounded-md text-xs disabled:bg-gray-100" />
+               <input type="time" step="1" value={timeStr} onChange={e => setTimeStr(e.target.value)} disabled={!manualMode} className="w-full px-3 py-1.5 border rounded-md text-xs disabled:bg-gray-100" />
+            </div>
+          </div>
+        </div>
+
+        {/* Item Entry Form */}
+        <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
+          <form onSubmit={handleAddItem} className="flex flex-wrap md:flex-nowrap gap-2 items-end">
+            <div className="flex-1 min-w-[180px]">
+              <label className="block text-xs font-medium text-gray-600 mb-1">Nama Barang</label>
+              <input type="text" required value={itemName} onChange={e => setItemName(e.target.value)} className="w-full border px-3 py-1.5 rounded-md text-sm" placeholder="Contoh: Kopi Susu" />
+            </div>
+            <div className="w-20">
+              <label className="block text-xs font-medium text-gray-600 mb-1">Qty</label>
+              <input type="number" min="1" required value={itemQty} onChange={e => setItemQty(Number(e.target.value))} className="w-full border px-3 py-1.5 rounded-md text-sm text-center" />
+            </div>
+            <div className="w-32">
+              <label className="block text-xs font-medium text-gray-600 mb-1">Harga (Rp)</label>
+              <input type="number" min="0" required value={itemPrice} onChange={e => setItemPrice(e.target.value === '' ? '' : Number(e.target.value))} className="w-full border px-3 py-1.5 rounded-md text-sm" placeholder="0" />
+            </div>
+            <Button type="submit" className="w-full md:w-auto"><Plus size={16}/> Tambah</Button>
+          </form>
+
+          {/* Cart Table */}
+          <div className="mt-4 border rounded-md overflow-hidden">
+            <table className="w-full text-xs text-left">
+              <thead className="bg-gray-100 border-b font-semibold text-gray-700">
+                <tr>
+                  <th className="px-3 py-2">Barang</th>
+                  <th className="px-3 py-2 text-center">Qty</th>
+                  <th className="px-3 py-2 text-right">Harga</th>
+                  <th className="px-3 py-2 text-right">Subtotal</th>
+                  <th className="px-3 py-2 text-center w-8"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.length === 0 ? (
+                  <tr><td colSpan={5} className="text-center py-6 text-gray-400">Keranjang masih kosong</td></tr>
+                ) : (
+                  items.map(item => (
+                    <tr key={item.id} className="border-b last:border-0 hover:bg-gray-50">
+                      <td className="px-3 py-2 font-medium">{item.name}</td>
+                      <td className="px-3 py-2 text-center">{item.qty}</td>
+                      <td className="px-3 py-2 text-right">{item.price.toLocaleString('id-ID')}</td>
+                      <td className="px-3 py-2 text-right font-semibold">{item.subtotal.toLocaleString('id-ID')}</td>
+                      <td className="px-3 py-2 text-center">
+                        <button onClick={() => handleRemoveItem(item.id)} className="text-red-500 hover:text-red-700"><Trash2 size={14}/></button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Payment Calculation Section */}
+        <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
+           <div className="flex justify-between items-center mb-2 text-sm">
+             <span className="text-gray-600">Subtotal</span>
+             <span className="font-medium">{formatCurrency(subtotal)}</span>
+           </div>
+           <div className="flex justify-between items-center mb-3 text-sm">
+             <span className="text-gray-600">Diskon Total (Rp)</span>
+             <input type="number" min="0" value={discount} onChange={e => setDiscount(e.target.value === '' ? '' : Number(e.target.value))} className="border rounded px-2 py-1 w-32 text-right text-sm" placeholder="0" />
+           </div>
+           
+           <div className="flex justify-between items-center mb-4 text-lg font-bold text-blue-700 pt-2 border-t">
+             <span>TOTAL TAGIHAN</span>
+             <span>{formatCurrency(total)}</span>
+           </div>
+           
+           <div className="pt-3 border-t grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">Nominal Pembayaran (Rp)</label>
+                <input type="number" min="0" value={payment} onChange={e => setPayment(e.target.value === '' ? '' : Number(e.target.value))} className="w-full border-2 border-blue-300 focus:border-blue-600 rounded-md px-3 py-2 text-base font-bold text-gray-800" placeholder="0" />
+              </div>
+              <div className="text-left md:text-right">
+                <label className="block text-xs font-semibold text-gray-600 mb-1">Uang Kembali</label>
+                <div className={`text-xl font-extrabold ${change > 0 ? 'text-green-600' : 'text-gray-400'}`}>
+                  {formatCurrency(change)}
+                </div>
+              </div>
+           </div>
+           
+           <Button className="w-full py-3 mt-5 text-base shadow-md font-bold" onClick={handleSaveAndPrint} disabled={items.length === 0}>
+              <Printer size={20} /> SIMPAN & CETAK STRUK
+           </Button>
+        </div>
+
+      </div>
+
+      {/* RIGHT REALTIME PREVIEW */}
+      <div className="w-full xl:w-[260px] bg-gray-200 rounded-lg p-4 flex flex-col items-center justify-start min-h-[400px]">
+        <h3 className="text-center font-bold text-gray-700 mb-3 text-xs tracking-wider uppercase">PREVIEW CETAK 57mm</h3>
+        <div className="w-full flex justify-center overflow-x-auto pb-2">
+           <ReceiptRenderer transaction={currentTransaction} />
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const StoresView = () => {
+  const { stores, setStores, templates, showToast, askConfirmation } = useAppContext();
+  const [editingId, setEditingId] = useState<string | null>(null);
+  
+  const handleSave = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const fd = new FormData(e.currentTarget);
+    const storeObj: StoreData = {
+      id: editingId === 'new' ? generateId() : editingId!,
+      name: fd.get('name') as string,
+      address1: fd.get('address1') as string,
+      phone: fd.get('phone') as string,
+      templateId: fd.get('templateId') as string,
+      logoUrl: fd.get('logoUrl') as string,
+      footerText: fd.get('footerText') as string,
+      fontFamily: fd.get('fontFamily') as string,
+    };
+
+    if (editingId === 'new') {
+      setStores([...stores, storeObj]);
+      showToast("Toko baru berhasil ditambahkan", "success");
+    } else {
+      setStores(stores.map(s => s.id === editingId ? storeObj : s));
+      showToast("Data toko diperbarui", "success");
+    }
+    setEditingId(null);
+  };
+
+  const deleteStore = (id: string) => {
+    if (stores.length === 1) {
+      showToast("Minimal harus ada 1 data toko!", "error");
+      return;
+    }
+    askConfirmation("Hapus Toko", "Apakah Anda yakin ingin menghapus data toko ini?", () => {
+      setStores(stores.filter(s => s.id !== id));
+      showToast("Toko berhasil dihapus", "info");
+    });
+  };
+
+  return (
+    <div className="max-w-4xl">
+      <div className="flex justify-between items-center mb-6">
+        <div>
+          <h2 className="text-2xl font-bold text-gray-800">Data Toko</h2>
+          <p className="text-sm text-gray-500">Kelola identitas dan format font toko Anda</p>
+        </div>
+        <Button onClick={() => setEditingId('new')}><Plus size={18}/> Tambah Toko Baru</Button>
+      </div>
+
+      {editingId && (
+        <form onSubmit={handleSave} className="bg-white p-6 rounded-lg shadow-sm border border-gray-200 mb-6">
+          <h3 className="font-bold text-lg mb-4 text-gray-800">{editingId === 'new' ? 'Tambah Toko Baru' : 'Edit Data Toko'}</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Input name="name" label="Nama Toko" required defaultValue={stores.find(s=>s.id===editingId)?.name} />
+            <Input name="phone" label="No. Telepon" required defaultValue={stores.find(s=>s.id===editingId)?.phone} />
+            <div className="col-span-1 md:col-span-2">
+               <Input name="address1" label="Alamat Utama" required defaultValue={stores.find(s=>s.id===editingId)?.address1} />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Pilih Template Struk</label>
+              <select name="templateId" className="w-full border rounded-md px-3 py-2 text-sm" defaultValue={stores.find(s=>s.id===editingId)?.templateId || templates[0]?.id}>
+                {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Pilih Font Struk Thermal</label>
+              <select name="fontFamily" className="w-full border rounded-md px-3 py-2 text-sm" defaultValue={stores.find(s=>s.id===editingId)?.fontFamily || "'Courier New', Courier, monospace"}>
+                <option value="'Courier New', Courier, monospace">Courier New (Klasik Struk)</option>
+                <option value="'Space Mono', monospace">Space Mono (Modern)</option>
+                <option value="'VT323', monospace">VT323 (Retro Pixel)</option>
+                <option value="'Fira Code', monospace">Fira Code (Monospace Rapi)</option>
+              </select>
+            </div>
+            <div className="col-span-1 md:col-span-2">
+               <Input name="logoUrl" label="URL Logo Gambar (Opsional)" defaultValue={stores.find(s=>s.id===editingId)?.logoUrl} placeholder="https://..." />
+            </div>
+            <div className="col-span-1 md:col-span-2">
+               <label className="block text-sm font-medium text-gray-700 mb-1">Pesan Footer Custom (Opsional)</label>
+               <textarea name="footerText" className="w-full border rounded-md px-3 py-2 text-sm" rows={2} defaultValue={stores.find(s=>s.id===editingId)?.footerText}></textarea>
+            </div>
+          </div>
+          <div className="flex gap-2 mt-4 justify-end">
+            <Button type="button" variant="outline" onClick={() => setEditingId(null)}>Batal</Button>
+            <Button type="submit">Simpan Toko</Button>
+          </div>
+        </form>
+      )}
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {stores.map(s => (
+          <div key={s.id} className="bg-white p-5 rounded-lg shadow-sm border border-gray-200 flex flex-col justify-between">
+            <div>
+              <h3 className="font-bold text-lg text-gray-800">{s.name}</h3>
+              <p className="text-gray-600 text-sm">{s.address1}</p>
+              <p className="text-gray-500 text-xs mt-1">Telp: {s.phone}</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <span className="bg-blue-50 text-blue-700 text-xs px-2 py-1 rounded border border-blue-100 font-medium">
+                  Template: {templates.find(t=>t.id===s.templateId)?.name || 'Default'}
+                </span>
+                <span className="bg-purple-50 text-purple-700 text-xs px-2 py-1 rounded border border-purple-100 font-medium">
+                  Font: {s.fontFamily ? s.fontFamily.split(',')[0].replace(/'/g, '') : 'Default'}
+                </span>
+              </div>
+            </div>
+            <div className="flex gap-2 mt-4 pt-4 border-t border-gray-100">
+              <Button variant="outline" className="flex-1" onClick={() => setEditingId(s.id)}><Edit size={14}/> Edit</Button>
+              <Button variant="outline" className="text-red-600 hover:bg-red-50" onClick={() => deleteStore(s.id)}><Trash2 size={14}/></Button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const TemplatesView = () => {
+  const { templates } = useAppContext();
+  
+  return (
+    <div className="max-w-4xl">
+       <h2 className="text-2xl font-bold mb-1 text-gray-800">Template Struk</h2>
+       <p className="text-sm text-gray-500 mb-6">Pilihan susunan komponen dan layout nota belanja</p>
+       
+       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {templates.map(tpl => (
+             <div key={tpl.id} className="bg-white rounded-lg shadow-sm border border-gray-200 p-5">
+                <div className="flex justify-between items-center mb-4 border-b pb-2">
+                   <h3 className="font-bold text-lg text-gray-800">{tpl.name}</h3>
+                   <span className="bg-gray-100 text-gray-700 text-xs px-2 py-1 rounded uppercase tracking-wider font-semibold">{tpl.type}</span>
+                </div>
+                
+                <div className="space-y-2 text-sm text-gray-600">
+                   <div className="flex justify-between"><span>Logo Toko:</span> <b className="text-gray-800">{tpl.showLogo ? 'Tampil' : 'Sembunyi'}</b></div>
+                   <div className="flex justify-between"><span>Nama Kasir:</span> <b className="text-gray-800">{tpl.showCashier ? 'Tampil' : 'Sembunyi'}</b></div>
+                   <div className="flex justify-between"><span>Rata Header:</span> <b className="text-gray-800">{tpl.alignCenter ? 'Tengah' : 'Kiri'}</b></div>
+                </div>
+
+                <div className="mt-4 bg-gray-50 p-3 text-xs font-mono text-center border rounded whitespace-pre-wrap text-gray-700">
+                   {tpl.footerMessage}
+                </div>
+             </div>
+          ))}
+       </div>
+    </div>
+  );
+};
+
+const HistoryView = () => {
+  const { transactions, stores, triggerPrint } = useAppContext();
+
+  return (
+    <div>
+      <h2 className="text-2xl font-bold text-gray-800 mb-1">Riwayat Transaksi</h2>
+      <p className="text-sm text-gray-500 mb-6">Daftar seluruh transaksi yang telah disimpan</p>
+
+      <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-sm">
+            <thead className="bg-gray-50 border-b font-semibold text-gray-700">
+              <tr>
+                <th className="px-4 py-3">Tanggal / Waktu</th>
+                <th className="px-4 py-3">No. Resi</th>
+                <th className="px-4 py-3">Toko</th>
+                <th className="px-4 py-3">Kasir</th>
+                <th className="px-4 py-3 text-right">Total</th>
+                <th className="px-4 py-3 text-center">Aksi</th>
+              </tr>
+            </thead>
+            <tbody>
+              {transactions.length === 0 ? (
+                <tr><td colSpan={6} className="text-center py-10 text-gray-400">Belum ada data transaksi tersimpan</td></tr>
+              ) : (
+                transactions.map(tx => (
+                  <tr key={tx.id} className="border-b last:border-0 hover:bg-gray-50">
+                    <td className="px-4 py-3">{formatDateToLocale(tx.date)} <span className="text-gray-400 ml-1">{tx.time}</span></td>
+                    <td className="px-4 py-3 font-mono font-bold text-blue-700">{tx.receiptNo}</td>
+                    <td className="px-4 py-3">{stores.find(s=>s.id===tx.storeId)?.name || 'Unknown'}</td>
+                    <td className="px-4 py-3 uppercase">{tx.cashierName || '-'}</td>
+                    <td className="px-4 py-3 text-right font-semibold">{formatCurrency(tx.total)}</td>
+                    <td className="px-4 py-3 text-center">
+                      <Button variant="outline" className="text-xs py-1 mx-auto" onClick={() => triggerPrint(tx)}>
+                        <Printer size={12}/> Cetak Ulang
+                      </Button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const SettingsView = () => {
+  const { settings, setSettings, exportData, importData, showToast } = useAppContext();
+  
+  const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      if (event.target?.result) {
+         importData(event.target.result as string);
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  return (
+    <div className="max-w-2xl">
+      <h2 className="text-2xl font-bold mb-1 text-gray-800">Pengaturan Aplikasi</h2>
+      <p className="text-sm text-gray-500 mb-6">Konfigurasi generator nomor resi dan pencadangan data</p>
+
+      <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200 mb-6">
+         <h3 className="font-bold text-lg mb-4 flex items-center gap-2 text-gray-800"><Settings size={20}/> Format Nomor Resi</h3>
+         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Input label="Prefix Resi" value={settings.receiptPrefix} onChange={(e:any) => setSettings({...settings, receiptPrefix: e.target.value})} />
+            <Input label="Jumlah Digit Angka" type="number" min="3" max="10" value={settings.receiptDigits} onChange={(e:any) => setSettings({...settings, receiptDigits: Number(e.target.value)})} />
+            <div className="col-span-1 md:col-span-2">
+              <label className="block text-sm font-medium text-gray-700 mb-2">Mode Generasi Nomor Resi</label>
+              <div className="flex gap-6">
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <input type="radio" name="mode" checked={settings.receiptMode === 'random'} onChange={() => setSettings({...settings, receiptMode: 'random'})} />
+                  Acak (Random Number)
+                </label>
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <input type="radio" name="mode" checked={settings.receiptMode === 'sequential'} onChange={() => setSettings({...settings, receiptMode: 'sequential'})} />
+                  Berurutan (Sequential)
+                </label>
+              </div>
+            </div>
+         </div>
+      </div>
+
+      <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
+         <h3 className="font-bold text-lg mb-2 flex items-center gap-2 text-gray-800"><Save size={20}/> Backup & Restore Data</h3>
+         <p className="text-sm text-gray-600 mb-4">Simpan cadangan data toko, template, dan riwayat transaksi dalam bentuk file JSON.</p>
+         <div className="flex flex-wrap gap-4">
+            <Button onClick={exportData} className="bg-green-600 hover:bg-green-700"><Download size={18}/> Unduh Backup</Button>
+            <div className="relative">
+              <input type="file" accept=".json" onChange={handleImport} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
+              <Button variant="outline"><Upload size={18}/> Pulihkan Data</Button>
+            </div>
+         </div>
+      </div>
+    </div>
+  );
+};
+
+const NotificationOverlay = () => {
+  const { toasts, confirmModal, closeConfirmModal } = useAppContext();
+
+  return (
+    <>
+      {/* Toast Notifications */}
+      <div className="fixed top-4 right-4 z-50 flex flex-col gap-2 max-w-sm">
+        {toasts.map(toast => (
+          <div key={toast.id} className={`p-3 rounded-lg shadow-lg text-white text-sm flex items-center gap-2 transition-all ${
+            toast.type === 'success' ? 'bg-green-600' : toast.type === 'error' ? 'bg-red-600' : 'bg-blue-600'
+          }`}>
+            {toast.type === 'success' && <CheckCircle size={18}/>}
+            {toast.type === 'error' && <AlertTriangle size={18}/>}
+            {toast.type === 'info' && <Info size={18}/>}
+            <span className="flex-1">{toast.message}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* Confirmation Modal */}
+      {confirmModal?.isOpen && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6 animate-in fade-in zoom-in duration-150">
+             <h3 className="font-bold text-lg text-gray-800 mb-2">{confirmModal.title}</h3>
+             <p className="text-sm text-gray-600 mb-6">{confirmModal.message}</p>
+             <div className="flex justify-end gap-3">
+                <Button variant="outline" onClick={closeConfirmModal}>Batal</Button>
+                <Button variant="danger" onClick={() => { confirmModal.onConfirm(); closeConfirmModal(); }}>Ya, Lanjutkan</Button>
+             </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+};
+
+const AppContent = () => {
+  const { stores, activeStoreId, setActiveStoreId, printQueue } = useAppContext();
+  const [activeTab, setActiveTab] = useState<'pos'|'stores'|'templates'|'history'|'settings'>('pos');
+
+  if (printQueue) {
+    return (
+      <div id="print-root">
+         <ReceiptRenderer transaction={printQueue} isPrintMode={true} />
+      </div>
+    );
+  }
+
+  const navItems = [
+    { id: 'pos', label: 'Kasir / Transaksi', icon: <ShoppingCart size={18}/> },
+    { id: 'history', label: 'Riwayat Cetak', icon: <History size={18}/> },
+    { id: 'stores', label: 'Data Toko', icon: <Store size={18}/> },
+    { id: 'templates', label: 'Template Struk', icon: <LayoutTemplate size={18}/> },
+    { id: 'settings', label: 'Pengaturan', icon: <Settings size={18}/> },
+  ];
+
+  return (
+    <div className="flex h-screen bg-gray-100 font-sans text-gray-800 no-print overflow-hidden">
+      <NotificationOverlay />
+
+      {/* SIDEBAR */}
+      <div className="w-60 bg-gray-900 text-white flex flex-col shrink-0">
+        <div className="p-4 bg-gray-950 flex items-center gap-3 border-b border-gray-800">
+          <Printer className="text-blue-400" size={26}/>
+          <div>
+            <div className="font-bold text-base leading-tight">THERMAL POS</div>
+            <div className="text-[10px] text-gray-400 uppercase tracking-widest">57mm Web Print</div>
+          </div>
+        </div>
+        
+        <div className="p-4 border-b border-gray-800">
+          <label className="text-[11px] text-gray-400 uppercase tracking-wider mb-1.5 block">Toko Aktif</label>
+          <div className="relative">
+             <select 
+                value={activeStoreId} 
+                onChange={e => setActiveStoreId(e.target.value)}
+                className="w-full bg-gray-800 text-white border border-gray-700 rounded px-2.5 py-2 text-xs appearance-none pr-8 focus:outline-none focus:border-blue-500 font-medium"
+             >
+                {stores.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+             </select>
+             <ChevronDown size={14} className="absolute right-2.5 top-3 pointer-events-none text-gray-400"/>
+          </div>
+        </div>
+
+        <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
+          {navItems.map(item => (
+            <button
+              key={item.id}
+              onClick={() => setActiveTab(item.id as any)}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left text-sm transition-all ${
+                activeTab === item.id ? 'bg-blue-600 text-white font-medium shadow-sm' : 'text-gray-300 hover:bg-gray-800 hover:text-white'
+              }`}
+            >
+              {item.icon}
+              <span>{item.label}</span>
+            </button>
+          ))}
+        </nav>
+      </div>
+
+      {/* MAIN VIEW CONTENT */}
+      <div className="flex-1 overflow-hidden flex flex-col bg-gray-50">
+         <div className="p-6 overflow-y-auto flex-1">
+           {activeTab === 'pos' && <PosView />}
+           {activeTab === 'stores' && <StoresView />}
+           {activeTab === 'templates' && <TemplatesView />}
+           {activeTab === 'history' && <HistoryView />}
+           {activeTab === 'settings' && <SettingsView />}
+         </div>
+      </div>
+    </div>
+  );
+};
+
+export default function App() {
+  return (
+    <AppProvider>
+      <AppContent />
+    </AppProvider>
+  );
+}
