@@ -80,7 +80,7 @@ const DEMO_TEMPLATES: TemplateData[] = [
 
 const DEMO_STORES: StoreData[] = [
   { id: 'store-1', name: 'TOKO MAKMUR', storeType: 'retail', address1: 'Jl. Raya Ambulu No. 12', phone: '08123456789', templateId: 'tpl-1', fontFamily: "'Courier New', Courier, monospace", footerText: 'TERIMA KASIH\nBARANG YANG SUDAH DIBELI TIDAK BISA DIKEMBALIKAN' },
-  { id: 'store-spbu', name: 'SPBU PERTAMINA AMBULU', storeType: 'spbu', spbuNumber: '54.681.01', spbuProducts: 'PERTAMAX:16250, PERTALITE:10000, BIOSOLAR:6800, DEXLITE:15000', spbuOperators: 'Joko Irwanto, Antika, Suciwati, Budi', address1: 'Jl. Manggar No. 140, Tegalsari, Ambulu', phone: '(0336) 881176', templateId: 'tpl-spbu', fontFamily: "'Courier New', Courier, monospace" }
+  { id: 'store-spbu', name: 'SPBU PERTAMINA AMBULU', storeType: 'spbu', spbuNumber: '54.681.01', spbuProducts: 'PERTAMAX:16250, PERTALITE:10000, BIOSOLAR:6800, DEXLITE:15000', spbuOperators: 'Joko Irwanto, Antika, Suciwati, Budi', address1: 'Jl. Manggar No. 140, Tegalsari, Ambulu', phone: '(0336) 881176', templateId: 'tpl-spbu', fontFamily: "'Courier New', Courier, monospace", logoUrl: 'https://i.ibb.co.com/qYhx8CrJ/Whats-App-Image-2026-11-21-at-13-26-16.jpg' }
 ];
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -243,7 +243,15 @@ const ReceiptRenderer = ({ transaction, isPrintMode = false }: { transaction: Tr
     return (
       <div className={wrapperClass} style={{ boxSizing: 'border-box', overflow: 'hidden', fontFamily: storeFont }}>
         <div className="text-center font-bold text-black pb-1">
-           {template.showLogo && <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/4/44/Pertamina_Logo.svg/256px-Pertamina_Logo.svg.png" style={{ filter: 'grayscale(100%) contrast(200%)' }} alt="Logo" className="max-w-[120px] mx-auto mb-2" />}
+           {template.showLogo && (
+             <img 
+               src={store.logoUrl || "https://upload.wikimedia.org/wikipedia/commons/thumb/4/44/Pertamina_Logo.svg/256px-Pertamina_Logo.svg.png"} 
+               onError={(e) => { e.currentTarget.style.display = 'none'; }}
+               style={{ filter: 'grayscale(100%) contrast(200%)' }} 
+               alt="Logo" 
+               className="max-w-[120px] mx-auto mb-2" 
+             />
+           )}
            <div className="text-[13px] uppercase tracking-wide leading-snug">{store.name}</div>
            <div className="whitespace-pre-wrap text-[10px] uppercase font-semibold">
              {store.spbuNumber ? store.spbuNumber + ', ' : ''}{store.address1}
@@ -324,7 +332,7 @@ const ReceiptRenderer = ({ transaction, isPrintMode = false }: { transaction: Tr
       {/* HEADER */}
       <div className={`${template.alignCenter ? "text-center" : "text-left"} text-black`}>
         {template.showLogo && store.logoUrl && (
-           <img src={store.logoUrl} alt="Logo" className={`max-w-[100px] max-h-[60px] object-contain mb-2 ${template.alignCenter ? 'mx-auto' : ''}`} style={{ filter: 'grayscale(100%)' }} />
+           <img src={store.logoUrl} onError={(e) => { e.currentTarget.style.display = 'none'; }} alt="Logo" className={`max-w-[100px] max-h-[60px] object-contain mb-2 ${template.alignCenter ? 'mx-auto' : ''}`} style={{ filter: 'grayscale(100%)' }} />
         )}
         <div className="font-bold text-[13px] uppercase leading-snug">{store.name}</div>
         <div className="whitespace-pre-wrap text-[11px] font-semibold">{store.address1}</div>
@@ -439,7 +447,7 @@ const Input = ({ label, name, type = 'text', required = false, defaultValue = ''
 
 // --- VIEWS ---
 const PosView = () => {
-  const { stores, settings, activeStoreId, setActiveStoreId, transactions, setTransactions, triggerPrint, showToast } = useAppContext();
+  const { stores, settings, setSettings, activeStoreId, setActiveStoreId, transactions, setTransactions, triggerPrint, showToast } = useAppContext();
   const store = stores.find(s => s.id === activeStoreId) || stores[0];
   
   const [cashierName, setCashierName] = useState('');
@@ -639,11 +647,13 @@ const PosView = () => {
         <div className="bg-white border border-gray-200 rounded-lg p-3 flex flex-wrap gap-4 items-center justify-between text-sm shadow-sm">
           <div className="flex items-center gap-3">
              <span className="font-semibold text-gray-700">Waktu Cetak:</span>
-             <span className={`px-2 py-0.5 rounded ${settings.dateMode === 'auto' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}`}>{settings.dateMode === 'auto' ? 'Otomatis' : 'Manual'}</span>
+             <button type="button" onClick={() => setSettings({...settings, dateMode: settings.dateMode === 'auto' ? 'manual' : 'auto'})} className={`px-2 py-0.5 rounded text-xs font-bold transition-colors ${settings.dateMode === 'auto' ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-orange-500 text-white hover:bg-orange-600'}`}>
+               {settings.dateMode === 'auto' ? 'Otomatis' : 'Manual (Edit)'}
+             </button>
           </div>
           <div className="flex gap-2">
-            <input type="date" value={dateStr} onChange={e => setManualDate(e.target.value)} disabled={settings.dateMode === 'auto'} className="border rounded px-2 py-1 text-sm disabled:bg-transparent disabled:border-none" />
-            <input type="time" step="1" value={timeStr} onChange={e => setManualTime(e.target.value)} disabled={settings.dateMode === 'auto'} className="border rounded px-2 py-1 text-sm disabled:bg-transparent disabled:border-none" />
+            <input type="date" value={dateStr} onChange={e => setManualDate(e.target.value)} disabled={settings.dateMode === 'auto'} className="border rounded px-2 py-1 text-sm disabled:bg-gray-50 disabled:text-gray-400" />
+            <input type="time" step="1" value={timeStr} onChange={e => setManualTime(e.target.value)} disabled={settings.dateMode === 'auto'} className="border rounded px-2 py-1 text-sm disabled:bg-gray-50 disabled:text-gray-400" />
           </div>
         </div>
 
